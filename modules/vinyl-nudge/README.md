@@ -60,7 +60,7 @@ Every hardware run (OCTABAM1-5) and the measurements before 18 Oct 2026
 carried repeat98's REPITCH beside this module, and the DJ use was a
 track on RPCH: it follows the project tempo by speed, so the nudge is a
 turntable's and the fader moves speed and pitch together. REPITCH left
-main on 13 Oct 2026 (`git show bef4ecdf^:modules/repitch/README.md`);
+main on 13 Oct 2026 (`git show cf836faa:modules/repitch/README.md`);
 this module does not need it: "dry" is the renderer's resolved TSTR 0,
 which OFF is and which RPCH was, and the tempo fader works on any track
 that reads the sample tempo (NORM, BEAT, RPCH). The hooks sit beside
