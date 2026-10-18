@@ -67,6 +67,11 @@ Cases:
             (0x460d1736) must be switched on by the lone REC only; and the
             track must play through both cues, every frame advancing 16.
 
+--shots renders the manual's screens instead of judging: three short runs
+whose LCD plane is taken as the port quits, at the moment each shows
+(docs/site/img/vinyl-nudge/: percent, time-left, cue), black on white as
+tools/emu/live_shots.py renders them.
+
 What it cannot see: pitch by ear, hardware timing, the glyphs themselves
 (the field was read from LCD planes by eye, 18 Oct 2026: "+1.9", "-1:38",
 and stock's "120.0" back with nothing left over).
@@ -195,6 +200,52 @@ def frame_positions(text):
         last[-1] = int(m.group(2), 16)
         prev = s
     return last
+
+
+SHOTS = {  # screen: (TSTR, the script's events after the trigger, quit ms after the trigger)
+    # the fader moved: the percentage, 0.3 s after the last step
+    "percent": (2, ["900 key 0x10 down", "1100 enc 6 5", "1400 key 0x33 down", "1440 key 0x33 up",
+                    "1700 key 0x3e down", "1800 enc 6 2", "1900 key 0x3e up"], 2200),
+    # T1 held on a 100 s trim: the time left
+    "time-left": (0, ["400 poke " + ";".join(f"{0x800049d8 + 44 + i:#x}={b:#x}"
+                                             for i, b in enumerate((4418304).to_bytes(4, "big"))),
+                      "700 key 0x10 down"], 1400),
+    # T1 + REC: the cue's popup
+    "cue": (0, ["900 key 0x10 down", "1000 key 0x29 down", "1040 key 0x29 up"], 1300),
+}
+
+
+def shots(a, image):
+    """Render SHOTS to docs/site/img/vinyl-nudge/<screen>.png."""
+    dest = ROOT / "docs/site/img/vinyl-nudge"
+    dest.mkdir(parents=True, exist_ok=True)
+    wav = OUT / "REPITCH_440_120.wav"
+    if not wav.is_file():
+        vr.make_loop(wav)
+    for screen, (tstr, events, end) in SHOTS.items():
+        work = OUT / "shots" / screen
+        work.mkdir(parents=True, exist_ok=True)
+        vr.build_project(pathlib.Path(a.project).expanduser(), work / "project", tstr, 2, 120.0, 64, 127, "flex")
+        vr.stage(work / "project", work / "card.img", wav)
+        lines = ["1500 key 0x32 down", "1540 key 0x32 up",
+                 f"{T_TRIG} key 0x10 down", f"{T_TRIG + 100} key 0x28 down", f"{T_TRIG + 140} key 0x28 up",
+                 f"{T_TRIG + 240} key 0x10 up"]
+        lines += [f"{T_TRIG + int(e.split()[0])} " + e.split(" ", 1)[1] for e in events]
+        lines.append(f"{T_TRIG + end} quit")
+        (work / "keys.script").write_text("\n".join(lines) + "\n")
+        lcd = work / "lcd.bin"
+        cmd = [str(EMU), "--image", str(image), "--card", str(work / "card.img"), "--set", "OCTABAM",
+               "--project", "RIG", "--load-ms", "90000", "--mkii", "--dsp",
+               "--live-script", str(work / "keys.script"), "--lcd", str(lcd)]
+        with open(work / "port.txt", "w") as f:
+            r = subprocess.run(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT)
+        if r.returncode or not lcd.is_file():
+            sys.exit(f"verify_vinyl_nudge: shot {screen} failed -- {work / 'port.txt'}")
+        r = subprocess.run([str(PY), str(ROOT / "tools/emu/lcd_view.py"), str(lcd), "--png",
+                            str(dest / f"{screen}.png"), "--scale", "4", "--palette", "white"],
+                           cwd=ROOT, stdin=subprocess.DEVNULL)
+        print(f"  shot {screen}: {dest / f'{screen}.png'}" if not r.returncode else f"  [FAIL] shot {screen}", flush=True)
+    return 0
 
 
 def plane_clear(path, x0, x1, y0, y1):
@@ -329,6 +380,7 @@ def main():
     ap.add_argument("--work", default="")
     ap.add_argument("--case", action="append", choices=sorted(CASES), help="default: all")
     ap.add_argument("--series", action="store_true", help="print every window's speed")
+    ap.add_argument("--shots", action="store_true", help="render the manual's screens, judge nothing")
     a = ap.parse_args()
     if a.work:
         OUT = pathlib.Path(a.work).resolve()
@@ -346,6 +398,8 @@ def main():
     images = {"module": OUT / "module.bin", "unhooked": OUT / "module.bin"}
     names = a.case or list(CASES)
     build(a.remix, images["module"])
+    if a.shots:
+        return shots(a, images["module"])
     show_left = symbol("show_left")
     text_buf = symbol("text")
     drawn = symbol("drawn")

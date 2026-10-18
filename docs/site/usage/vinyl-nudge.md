@@ -37,6 +37,8 @@ speed, in percent, with its sign: `+1.9`, `-0.5`. About a second after
 the last step it goes back to the time left (track still held) or the
 BPM.
 
+![The BPM field after the fader moved: the track runs 1.9 % fast](../../img/vinyl-nudge/percent.png)
+
 The value is the sample slot's and is saved with the project. The
 sample's `.ot` file keeps its own until the audio editor saves it. On an
 OFF track the sample tempo is not used, so the fader does nothing there.
@@ -49,6 +51,8 @@ nudge and fader included: `-1:42`, and `-12'` (minutes only) from ten
 minutes. A looped track counts to its trim end, not the loop's; a track
 playing backwards shows the BPM.
 
+![T1 held: 1:38 left of its sample](../../img/vinyl-nudge/time-left.png)
+
 ## The Cue
 
 [TRACK] + REC adds a slice to the held track's sample, from where it
@@ -58,3 +62,5 @@ screen shows `ADDED SLICE!`. The track keeps playing. To start it there,
 set SLIC to ON in the track's playback setup, choose SLICES with
 FUNC + UP/DOWN and press the slice's trig key. The slices are saved with
 the project and are there after a power cycle.
+
+![[TRACK] + REC: the cue's slice is added](../../img/vinyl-nudge/cue.png)
