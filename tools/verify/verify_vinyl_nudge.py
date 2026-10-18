@@ -7,7 +7,7 @@ and out; a stretched track keeps stock's tempo nudge.
 
 With a project, a copy gets verify_repitch's loop on T1 (a two-second
 440 Hz stereo loop attributed 120 BPM, LOOP on, the project at 120 BPM, so
-a REPITCH track plays at 1.0). The port boots the image with the
+a dry track plays at 1.0). The port boots the image with the
 transport STOPPED and plays a live script: NO (the date prompt); T1 held
 + PLAY, stock's own track trigger (0x40083a30), with no trig and no
 sequencer; then T1 held + RIGHT held for two seconds, released; then
@@ -15,38 +15,52 @@ nothing. Every write to T1's sample position (voice +68) is watched, and
 the speed (source frames per output sample) is measured in 50 ms windows.
 
 Cases:
-  dry       FLEX, TSTR REPITCH: speed 1 -> above 1 while held -> back to 1,
+  dry       FLEX, TSTR OFF: speed 1 -> above 1 while held -> back to 1,
             eased: no 50 ms window carries more than STEP_SHARE of the
             swing, and the way back takes RETURN_MIN windows or more
   off       STATIC, TSTR OFF: the same
   stretch   FLEX, TSTR NORM: stock's tempo nudge, untouched: the speed
             still moves while held (the renderer's tempo ratio)
-  control   FLEX, TSTR REPITCH on the same remix WITHOUT this module (the
-            REPITCH test remix): the speed must not move -- stock's nudge
-            is inert on a dry track, so a move in `dry` is the module's
+  control   FLEX, TSTR OFF on the same image with the two nudge hooks
+            (0x40000e78, 0x40004108) put back to stock's bytes by --poke:
+            the speed must not move -- stock's nudge is inert on a dry
+            track, so a move in `dry` is the module's
 
-  fader     FLEX, TSTR REPITCH: T1 held, then LEVEL +5, UP, UP, LEVEL pushed
+  fader     FLEX, TSTR NORM: T1 held, then LEVEL +5, UP, UP, LEVEL pushed
             +2, LEVEL -1, T1 released. The slot's tempo (BPMx24, FLEX
             settings 0x100b14f0 + 0x114) must be written by the audio
             editor's own setter (0x40099126) as 2875, 2874, 2873, 2825,
             2826; T1's level (0x80000c50) must not be written after the
             trigger (LEVEL is the tempo's while a track is held); the track
-            must end at 2880 / 2826 = 1.0191 (REPITCH: project / sample);
+            must end at 2880 / 2826 = 1.0191 (a stretched track's position
+            moves at project / sample tempo; so would REPITCH's);
             and the readout timer must count show_left back to 0. The
             module's text buffer must end as "+1.9" (2880 / 2826 - 1, the
             percentage the field showed), and the LCD plane at the end
             (the field stock's again) must have nothing in x 36..41 of the
             field's rows, where our text overhangs stock's clear.
-  remain    FLEX, TSTR REPITCH: T1 started, its voice's trim end poked to
+  remain    FLEX, TSTR OFF: T1 started, its voice's trim end poked to
             4,418,304 frames (100.2 s), T1 held, the run ended while held:
             the text buffer must read "-1:38" or "-1:39".
-  steady    STATIC, TSTR OFF: T1 started, then held for 3 s: the field must
+  remain-norm  FLEX, TSTR NORM, the same (the slot's trim end poked too: a
+            stretched voice re-reads its end from the slot every chunk)
+            with the sample's tempo poked to 60 BPM (BPMx24 1440) as T1
+            starts: the track plays at 2x, so
+            the time left is half: "-0:48" or "-0:49" (from the increment,
+            which stays 1.0 on a stretched track, it read "-1:38").
+  steady    STATIC, TSTR OFF: T1 started and held for 3.5 s: the field must
             hold the time left the whole while (the module's `drawn` is
             never cleared, which is what a draw of stock's BPM does). A
             STATIC voice's play-state byte cycles 1, 0, 0xff every ~58 ms as
             it streams; reading it alone, OCTABAM3 flashed stock's BPM into
-            the time on the unit (18 Oct 2026).
-  cue       FLEX, TSTR REPITCH: T1 started; T1 + REC at about 0.9 s and
+            the time on the unit (18 Oct 2026). A grace counted in draws
+            (OCTABAM4) passed before the rebase and let one through after
+            it; the module now counts a voice as playing for 0.3 s of DMA
+            timer 3 after it last read 1, and a track counts as held by the panel's
+            key row (0x46100b1a), not the key cache word stock's LEFT/RIGHT
+            handler reads, which a layer rebuild zeroes while the key is
+            held.
+  cue       FLEX, TSTR OFF: T1 started; T1 + REC at about 0.9 s and
             1.9 s, then REC alone. Slot 1 must end with two slices, sorted,
             the first starting between 0.7 and 1.1 s and the second later,
             both ending at the trim end with no loop (-1); grid recording
@@ -81,16 +95,19 @@ FADER_WANT = (2875, 2874, 2873, 2825, 2826)
 T_TRIG, T_HOLD, T_RELEASE, T_END = 2500, 4500, 6500, 10000   # emulated ms
 
 CASES = {  # name: machine, SETUP TSTR, sample TSMODE, which image, the speed must move while held
-    "dry": ("flex", 4, 2, "module", True),
+    "dry": ("flex", 0, 2, "module", True),
     "off": ("static", 0, 2, "module", True),
     "stretch": ("flex", 2, 2, "module", True),
-    "control": ("flex", 4, 2, "control", False),
-    "fader": ("flex", 4, 2, "module", None),
-    "remain": ("flex", 4, 2, "module", None),
+    "control": ("flex", 0, 2, "unhooked", False),
+    "fader": ("flex", 2, 2, "module", None),
+    "remain": ("flex", 0, 2, "module", None),
+    "remain-norm": ("flex", 2, 2, "module", None),
     "steady": ("static", 0, 2, "module", None),
-    "cue": ("flex", 4, 2, "module", None),
+    "cue": ("flex", 0, 2, "module", None),
 }
 FLEX_1 = 0x100b14f0                 # FLEX slot 1's settings
+UNHOOK = ";".join(f"{a + i:#x}={b:#x}" for a, h in ((0x40000e78, "222f0004206f0008"), (0x40004108, "287980001c80"))
+                  for i, b in enumerate(bytes.fromhex(h)))   # the nudge hooks, stock's bytes again
 GRID_REC = 0x460d1736
 VOICE_END_T1 = 0x800049d8 + 44
 
@@ -124,7 +141,7 @@ def fader_script():
     return "\n".join(lines) + "\n"
 
 
-def remain_script():
+def remain_script(norm=False):
     lines = []
     def ev(t, k, d): lines.append(f"{t} key {K[k]:#x} {d}")
     ev(1500, "no", "down"); ev(1540, "no", "up")
@@ -132,18 +149,25 @@ def remain_script():
     ev(T_TRIG + 240, "t1", "up")
     end = (4418304).to_bytes(4, "big")
     lines.append(f"{T_TRIG + 400} poke " + ";".join(f"{VOICE_END_T1 + i:#x}={b:#x}" for i, b in enumerate(end)))
+    if norm:
+        # a stretched voice re-reads its end from the slot each chunk: the
+        # slot's trim end (+304) is the one that holds
+        lines.append(f"{T_TRIG + 400} poke " + ";".join(f"{FLEX_1 + 304 + i:#x}={b:#x}" for i, b in enumerate(end)))
+        lines.append(f"{T_TRIG + 400} poke " + ";".join(f"{TEMPO_WORD + i:#x}={b:#x}"
+                                                       for i, b in enumerate((1440).to_bytes(4, "big"))))
     ev(T_TRIG + 700, "t1", "down")
     lines.append(f"{T_TRIG + 1400} quit")
     return "\n".join(lines) + "\n"
 
 
 def steady_script():
+    """T1 held from the trigger to the end: every draw after the first time
+    left is inside one hold (a release between two holds rightly draws the
+    BPM, which a hold-release-hold script counted as a failure)."""
     lines = []
     def ev(t, k, d): lines.append(f"{t} key {K[k]:#x} {d}")
     ev(1500, "no", "down"); ev(1540, "no", "up")
     ev(T_TRIG, "t1", "down"); ev(T_TRIG + 100, "play", "down"); ev(T_TRIG + 140, "play", "up")
-    ev(T_TRIG + 240, "t1", "up")
-    ev(T_TRIG + 500, "t1", "down")
     lines.append(f"{T_TRIG + 3500} quit")
     return "\n".join(lines) + "\n"
 
@@ -270,7 +294,7 @@ def run_case(a, name, machine, tstr, tsmode, image, keys=None, watch="", extra=(
     if r.returncode or "ended on quit" not in text:
         return dict(error=f"port run failed (exit {r.returncode}) -- {log}")
     sp_ = speeds(text)
-    if len(sp_) < 20 and name not in ("remain", "steady"):
+    if len(sp_) < 20 and name not in ("remain", "remain-norm", "steady"):
         return dict(error=f"the track did not play ({len(sp_)} windows of position writes) -- {log}")
     return dict(series=sp_, log=log, text=text, work=work)
 
@@ -302,7 +326,6 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("remix", nargs="?", default="vinyl")
     ap.add_argument("--project", default=os.environ.get("OT_PROJECT", ""))
-    ap.add_argument("--control", default="repitch", help="the remix without this module")
     ap.add_argument("--work", default="")
     ap.add_argument("--case", action="append", choices=sorted(CASES), help="default: all")
     ap.add_argument("--series", action="store_true", help="print every window's speed")
@@ -320,16 +343,12 @@ def main():
     if not EMU.is_file() or not PY.is_file():
         print("  [SKIP] verify_vinyl_nudge: needs the port (make emu-cf) and the .venv (make emu-setup)"); return 0
     OUT.mkdir(parents=True, exist_ok=True)
-    images = {"module": OUT / "module.bin", "control": OUT / "control.bin"}
+    images = {"module": OUT / "module.bin", "unhooked": OUT / "module.bin"}
     names = a.case or list(CASES)
     build(a.remix, images["module"])
     show_left = symbol("show_left")
     text_buf = symbol("text")
     drawn = symbol("drawn")
-    if any(CASES[n][3] == "control" for n in names):
-        if "VINYL NUDGE" in registry.remix(a.control).modules or "REPITCH" not in registry.remix(a.control).modules:
-            sys.exit(f"verify_vinyl_nudge: the control remix {a.control} must carry REPITCH and not VINYL NUDGE")
-        build(a.control, images["control"])
 
     fails = 0
     for name in names:
@@ -341,17 +360,18 @@ def main():
         elif name == "steady":
             res = run_case(a, name, machine, tstr, tsmode, images[which], keys=steady_script(),
                            watch=f";{drawn:#x},4")
-        elif name in ("fader", "remain"):
+        elif name in ("fader", "remain", "remain-norm"):
             res = run_case(a, name, machine, tstr, tsmode, images[which],
-                           keys=fader_script() if name == "fader" else remain_script(),
+                           keys=fader_script() if name == "fader" else remain_script(name == "remain-norm"),
                            watch=f";{TEMPO_WORD:#x},4;{LEVEL_T1:#x},2;{show_left:#x},4",
                            extra=("--lcd", str(OUT / name / "lcd.bin"),
                                   "--mem-dump", f"{text_buf:#x},12={OUT / name / 'text.bin'}"))
         else:
-            res = run_case(a, name, machine, tstr, tsmode, images[which])
+            res = run_case(a, name, machine, tstr, tsmode, images[which],
+                           extra=("--poke", UNHOOK) if which == "unhooked" else ())
         if "error" in res:
             print(f"  [FAIL] {name}: {res['error']}", flush=True); fails += 1; continue
-        if name in ("fader", "remain"):
+        if name in ("fader", "remain", "remain-norm"):
             shown = (res["work"] / "text.bin").read_bytes().split(b"\0")[0].decode("ascii", "replace")
         if name == "fader":
             ok, msg = judge_fader(res["text"], res["series"], show_left)
@@ -380,6 +400,9 @@ def main():
         elif name == "remain":
             ok = re.fullmatch(r"-1:3[89]", shown) is not None
             msg = f"text {shown!r} (want '-1:38' or '-1:39')"
+        elif name == "remain-norm":
+            ok = re.fullmatch(r"-0:4[89]", shown) is not None
+            msg = f"text {shown!r} (want '-0:48' or '-0:49': the track at 2x)"
         else:
             ok, msg = judge(res["series"], moves, eased=name in ("dry", "off"))
         fails += not ok

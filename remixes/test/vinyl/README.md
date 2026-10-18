@@ -1,18 +1,17 @@
-# `vinyl` — REPITCH and VINYL NUDGE
+# `vinyl` — VINYL NUDGE
 
-Two ColdFire modules and the stock effects. For DJ-style use: a track that
-follows the project tempo by speed, like a turntable, and that a held
-[TRACK] + [LEFT]/[RIGHT] bends by hand to line it up.
+One ColdFire module and the stock effects. For DJ-style use of STATIC and
+FLEX tracks: the track keys nudge a track like a turntable, ride a tempo
+fader, show the time a track has left and set cues.
 
 ## What is in it
 
-- **REPITCH** — `RPCH` in the TSTR selector: speed = project BPM / sample BPM, live. `modules/repitch/README.md`.
-- **VINYL NUDGE** — [TRACK] + [LEFT]/[RIGHT] on a track on OFF or RPCH bends its speed and pitch, eased in and out; NORM and BEAT keep stock's tempo nudge. [TRACK] + LEVEL (pushed: coarse) or UP/DOWN moves the track's sample tempo, a pitch fader that stays, shown at the BPM readout. `modules/vinyl-nudge/README.md`.
+- **VINYL NUDGE** — [TRACK] + [LEFT]/[RIGHT] on a dry (OFF) track bends its speed and pitch, eased in and out; NORM and BEAT keep stock's tempo nudge. [TRACK] + LEVEL (pushed: coarse) or UP/DOWN moves the track's sample tempo, a pitch fader that stays, its signed percentage shown at the BPM field; a held track shows its time left there. [TRACK] + REC adds a slice from the play position to the end: a cue. `modules/vinyl-nudge/README.md`.
 - the 14 stock FX2 effects, listed so the chooser is stock's.
 
 ## Status
 
-On MistaTwista's MKII as OCTABAM1 (17 Oct 2026): the nudge glides, no clicks. `verify_vinyl_nudge` measures it under the port.
+The module ran on MistaTwista's MKII as OCTABAM1-5 (17-18 Oct 2026) with repeat98's REPITCH beside it, before REPITCH left main; this selection, without REPITCH, is gated under the port by `verify_vinyl_nudge` and not flashed as such.
 
 ## Build
 

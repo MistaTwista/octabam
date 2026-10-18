@@ -32,7 +32,7 @@
         .equ    POPUP, 0x4005a2b8       | (text, 0x30)
         .equ    TXT_ADDED, 0x400b6b93   | "ADDED SLICE!"
         .equ    TXT_FULL, 0x400b6ba0    | "TOO MANY SLICES!"
-        .equ    HELD, 0x46c7da6e        | track key t held: (HELD + 24 * t) != 0
+        .equ    TRACK_ROW, 0x46100b1a   | the panel's key row 2: bit t = track key t held (tempo.s)
 
 | cue_add(track): a slice from the voice's position to the trim end.
 | d0 = the message to show (0: none). C ABI: d0/d1/a0/a1 scratch.
@@ -90,29 +90,15 @@ rec_cue:
         tst.l   8(%sp)
         beq.w   .rc_release
         move.l  %d2,-(%sp)
-        moveq   #0,%d2                  | track
-        moveq   #0,%d1                  | any held
-        lea     (HELD).l,%a0
-.rc_any:
-        tst.l   (%a0)
-        beq.s   .rc_any_next
-        moveq   #1,%d1
-.rc_any_next:
-        lea     24(%a0),%a0
-        addq.l  #1,%d2
-        moveq   #8,%d0
-        cmp.l   %d2,%d0
-        bne.s   .rc_any
-        tst.l   %d1
-        beq.s   .rc_stock_press
+        tst.b   (TRACK_ROW).l
+        beq.s   .rc_stock_press         | no track key held
         moveq   #1,%d0
         move.l  %d0,(rec_swallow).l
         moveq   #0,%d2
 .rc_track:
-        moveq   #24,%d0
-        mulu.l  %d2,%d0
-        lea     (HELD).l,%a0
-        tst.l   (%a0,%d0.l)
+        moveq   #0,%d0
+        move.b  (TRACK_ROW).l,%d0
+        btst    %d2,%d0
         beq.s   .rc_next
         move.l  %d2,-(%sp)
         bsr     cue_add

@@ -8,18 +8,17 @@ held track has left; [TRACK] + REC sets a cue, a slice from where the
 track plays to its end.
 
 Hold a track key and press or hold LEFT or RIGHT: a track that plays dry
-(TSTR **OFF**, or **RPCH** with REPITCH) slows down or speeds up together
-with its pitch, gliding there instead of jumping, and glides back when the
-keys are let go. This is how two records are lined up by ear. A track on
-NORM or BEAT keeps stock's own nudge, which moves its tempo and keeps its
-pitch. The master tempo is never touched, as in stock. With
-[REPITCH](../repitch/README.md) a track follows the project tempo by speed
-and can still be nudged by hand.
+(TSTR **OFF**; any value the voice renderer resolves to OFF, as REPITCH's
+RPCH did) slows down or speeds up together with its pitch, gliding there
+instead of jumping, and glides back when the keys are let go. This is how
+two records are lined up by ear. A track on NORM or BEAT keeps stock's
+own nudge, which moves its tempo and keeps its pitch. The master tempo is
+never touched, as in stock.
 
 Hold a track key and turn LEVEL (or press UP/DOWN): the track's sample
 tempo, the TEMPO an audio editor's ATTR page shows, moves by 1/24 BPM a
 step, a whole BPM a step with LEVEL pushed. Clockwise and UP lower it,
-which on an RPCH (or NORM/BEAT) track plays it faster, as a pitch fader
+which on a NORM or BEAT track (or an RPCH one) plays it faster, as a pitch fader
 pushed toward + would. While the fader moves, the BPM field at the top
 left shows how far the track runs from its own speed, in percent, signed
 ("+1.9", "-0.5": project tempo / sample tempo - 1; no "%" sign, which does
@@ -44,7 +43,7 @@ it from the top.
 |---|---|---|
 | LEFT / RIGHT | nudge the master tempo | unchanged |
 | [TRACK] + LEFT / RIGHT, track on NORM or BEAT | nudge that track's tempo, pitch kept | unchanged |
-| [TRACK] + LEFT / RIGHT, track on OFF or RPCH | nothing audible | speed and pitch, eased |
+| [TRACK] + LEFT / RIGHT, a dry track (OFF) | nothing audible | speed and pitch, eased |
 | [TRACK] + PLAY / STOP | trigger / stop the held tracks | unchanged |
 | [TRACK] + LEVEL | the track level (as LEVEL alone) | the sample tempo, 1/24 BPM a step; pushed, 1 BPM |
 | [TRACK] + UP / DOWN | nothing | the sample tempo, 1/24 BPM a step (UP faster) |
@@ -54,6 +53,20 @@ it from the top.
 The size of the nudge is stock's: −1 % / +1 % on the press, another 2 % on
 each key repeat, ±10 % at most, back to 0 on release. The module eases the
 track toward that value every frame: `current += (target − current) >> 9`.
+
+## REPITCH
+
+Every hardware run (OCTABAM1-5) and the measurements before 18 Oct 2026
+carried repeat98's REPITCH beside this module, and the DJ use was a
+track on RPCH: it follows the project tempo by speed, so the nudge is a
+turntable's and the fader moves speed and pitch together. REPITCH left
+main on 13 Oct 2026 (`git show bef4ecdf^:modules/repitch/README.md`);
+this module does not need it: "dry" is the renderer's resolved TSTR 0,
+which OFF is and which RPCH was, and the tempo fader works on any track
+that reads the sample tempo (NORM, BEAT, RPCH). The hooks sit beside
+REPITCH's and share an image with it (`0x40004108` begins where its
+`rate_hook` span ended). Since the rebase the test remix carries no
+REPITCH and the gate's cases run on OFF and NORM.
 
 ## Measured
 
@@ -130,11 +143,23 @@ track toward that value every frame: `current += (target − current) >> 9`.
   (written at `0x4000863a`, `0x40008862`, `0x400084b8`), a FLEX voice's
   stays 1. OCTABAM3, reading it alone, drew stock's BPM into the time left
   about one draw in five on the unit (MistaTwista's MKII, by eye: the time
-  "blinks and tries to show the tempo"). The time left now survives six
-  draws of a voice not reading 1; `steady` holds T1 of a STATIC track for
-  3 s and counts the draws of stock's BPM: 0, and 6 with the grace set to
-  0 (the control).
-- Builds and links (`make bus REMIX=vinyl`): three DRAM units, 1,446 B
+  "blinks and tries to show the tempo"). The module counts a voice as playing for 0.3 s
+  of DMA timer 3 after it last read 1 (a grace counted in draws,
+  OCTABAM4, held before the rebase onto main of 18 Oct 2026 and let one
+  draw through after it); `steady` holds T1 of a STATIC track for 3.5 s
+  and counts the draws of stock's BPM: 0, and 7 with the window set to 0
+  (the control).
+- ✅ "Held" is the panel's key row 2 (`0x46100b1a`, bit t = track key t),
+  not the key cache word stock's LEFT/RIGHT handler tests (`0x46c7da6e +
+  24·t`): under the port (18 Oct 2026) a layer rebuild at `0x4003180c`
+  wrote 0 to that word 80 ms into a hold, and a draw in that moment showed
+  the BPM.
+- ✅ On a NORM or BEAT track the time left runs at project / sample tempo,
+  the rate the renderer moves its position by; the increment stays 1.0
+  there (`remain-norm`: sample tempo poked to 60 BPM at a 120 BPM project,
+  the time left half, "-0:49"; before the fix it read "-1:38"). Such a
+  voice re-reads its trim end from the slot every chunk.
+- Builds and links (`make bus REMIX=vinyl`): three DRAM units, 1,478 B
   appended; `make check REMIX=vinyl` passes, REPITCH's hook contracts and
   playback cases included.
 
@@ -175,16 +200,19 @@ the one increment; REPITCH's playback cases measure the pitch).
   (the manifest's gate; `make check` runs it, playback with `OT_PROJECT`):
   the stock track trigger ([TRACK] + PLAY) with the transport stopped, then
   [TRACK] + RIGHT held for two seconds; T1's sample position watched, speed
-  per 50 ms window counted on whole frames. `dry` (FLEX, RPCH) and `off`
+  per 50 ms window counted on whole frames. `dry` (FLEX, OFF) and `off`
   (STATIC, OFF) must start at 1.000, rise by more than 0.02 while held and
   end within 0.002 of the start, eased: no window carries more than 35 % of
   the swing, and the way back to within 10 % of the start takes at least
   three windows (stock's own nudge, `stretch`, does it in one, 88 %);
-  `stretch` (NORM) must still move (stock's nudge); `control` (RPCH on the
-  REPITCH remix, no module) must not move. `fader`: the tempo writes, no
+  `stretch` (NORM) must still move (stock's nudge); `control` (OFF, the
+  same image with the two nudge hooks put back to stock's bytes by
+  `--poke`) must not move. `fader`: the tempo writes, no
   level write, the end speed, the readout timer, the text "+1.9" and the
   columns right of the field empty at the end. `remain`: the time left.
-  `steady`: the time left holds on a STATIC track. `cue`: two cues,
+  `remain-norm`: a NORM track whose sample tempo is poked to 60 BPM plays
+  at 2× and the time left is half. `steady`: the time left holds on a
+  STATIC track. `cue`: two cues,
   sorted, no grid recording, no position jump.
 
 ## The patch

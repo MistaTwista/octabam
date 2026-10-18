@@ -17,9 +17,13 @@
 | Input: the track keys' held layer (0x400d164a) has no encoder table;
 | the manifest points it at tempo_levels, one record for LEVEL, the shape
 | of CUE's (0x400bf274). UP/DOWN with a track held reach the main layer's
-| handler (0x400491a0), which tempo_keys enters first. "Held" is stock's
-| own test, the key cache word 0x46c7da6e + 24 * track (the LEFT/RIGHT
-| handler's, 0x4004b9a6).
+| handler (0x400491a0), which tempo_keys enters first. "Held" is the panel
+| link's own record of key row 2 (0x46100b18 + 2, the parser's last state
+| of the row, docs/firmware/PANEL.md section 4b): bit t is track key t.
+| Not the key cache word stock's LEFT/RIGHT handler tests (0x46c7da6e +
+| 24 * track): a layer rebuild zeroes it for a moment while the key is
+| held (0x4003180c, under the port, 18 Oct 2026), and a draw then showed
+| the BPM.
 |
 | Readout: 0x4004b08c draws the BPM field (cleared x 13..35, y 51..59 with
 | 0x40012254; the whole BPM in the big font 0x400ba83a, then the tenths).
@@ -37,13 +41,15 @@
         .equ    VOICES, 0x800049d8      | per-track voices, 168 B
         .equ    V_SETTINGS, 8           | the bound sample's settings
         .equ    V_MACHINE, 20           | 0 STATIC, 1 FLEX
+        .equ    V_TSTR, 24              | the renderer's resolved TSTR: 0 dry, else stretched
         .equ    V_STATE, 26             | 1 while it plays; a STATIC voice cycles 1, 0, 0xff every
-                                        | ~58 ms as it streams (under the port, 18 Oct 2026)
+                                        | ~58 ms as it streams (under the port, 18 Oct 2026), so a
+                                        | voice counts as playing for LIVE_COUNTS after its last 1
         .equ    V_END, 44               | the trim end, frames
         .equ    V_POS, 68               | the play position, frames
         .equ    STATES, 0x80004898      | per-track increment states, 40 B
         .equ    S_INC, 36               | the playback increment, Q26 (nudge and fader included)
-        .equ    HELD, 0x46c7da6e        | track key t held: (HELD + 24 * t) != 0
+        .equ    TRACK_ROW, 0x46100b1a   | the panel's key row 2 as last reported: bit t = track key t held
         .equ    LEVEL_PUSHED, 0x46c7debe
         .equ    PROJECT_BPM24, 0x80001814
         .equ    S_BPM24, 0x114
@@ -60,19 +66,19 @@
         .equ    TICK_PERIOD, 5          | UI ticks a timer call, as stock's nudge
         .equ    SHOW_CALLS, 12          | timer calls the percentage stays after the last step
         .equ    SR, 44100
-        .equ    TIME_GRACE, 6           | draws the last time left survives a voice not reading 1
+        .equ    DTCN3, 0xfc07c00c       | DMA timer 3's count: 132 MHz, free-running
+        .equ    LIVE_COUNTS, 39600000   | 0.3 s: a voice that read 1 that recently still plays
 
-| d0 = the first held track key (0..7), or -1. d1/a0 clobbered.
+| d0 = the first held track key (0..7), or -1. d1 clobbered.
 first_held:
-        lea     (HELD).l,%a0
+        moveq   #0,%d1
+        move.b  (TRACK_ROW).l,%d1
         moveq   #0,%d0
 .fh_loop:
-        tst.l   (%a0)
+        btst    %d0,%d1
         bne.s   .fh_out
-        lea     24(%a0),%a0
         addq.l  #1,%d0
-        moveq   #8,%d1
-        cmp.l   %d0,%d1
+        cmpi.l  #8,%d0
         bne.s   .fh_loop
         moveq   #-1,%d0
 .fh_out:
@@ -86,10 +92,9 @@ tempo_step:
         moveq   #0,%d2                  | track
         moveq   #-1,%d4                 | the first held track with a sample
 .ts_track:
-        moveq   #24,%d0
-        mulu.l  %d2,%d0
-        lea     (HELD).l,%a0
-        tst.l   (%a0,%d0.l)
+        moveq   #0,%d0
+        move.b  (TRACK_ROW).l,%d0
+        btst    %d2,%d0
         beq.s   .ts_next
         move.l  #168,%d0
         mulu.l  %d2,%d0
@@ -268,7 +273,10 @@ percent_text:
 
 | The time track d0's sample has left to play into text: "-1:42" under
 | ten minutes (23 px, the field's width), "-12'" from there, at the speed
-| it plays now. d0 = 0: not playing a STATIC or FLEX sample.
+| it plays now: a dry track's increment (nudge and fader in it), a
+| stretched track's project / sample tempo (the renderer moves its
+| position by that ratio, docs/firmware/REPITCH.md, whatever the
+| increment). d0 = 0: not playing a STATIC or FLEX sample.
 remain_text:
         lea     -12(%sp),%sp
         movem.l %d2-%d4,(%sp)
@@ -281,19 +289,45 @@ remain_text:
         cmp.b   V_MACHINE(%a0),%d1
         bcs.w   .rt_none                | not STATIC or FLEX
         cmp.b   V_STATE(%a0),%d1
-        bne.w   .rt_none                | not playing
+        bne.s   .rt_recent
+        move.l  (DTCN3).l,%d0           | playing: note when
+        lea     (live_at).l,%a1
+        move.l  %d0,(%a1,%d4.l*4)
+        bra.s   .rt_live
+.rt_recent:
+        move.l  (DTCN3).l,%d0           | a STATIC voice between its stream's states,
+        lea     (live_at).l,%a1         | or one that has stopped
+        sub.l   (%a1,%d4.l*4),%d0
+        cmpi.l  #LIVE_COUNTS,%d0
+        bcc.w   .rt_none
+.rt_live:
         move.l  V_END(%a0),%d2
         sub.l   V_POS(%a0),%d2          | source frames left
         bpl.s   .rt_left
         moveq   #0,%d2
 .rt_left:
+        tst.b   V_TSTR(%a0)
+        beq.s   .rt_dry
+        movea.l V_SETTINGS(%a0),%a1     | stretched: project / sample tempo
+        move.l  %a1,%d1
+        beq.w   .rt_none
+        move.l  S_BPM24(%a1),%d1
+        beq.w   .rt_none
+        move.l  (PROJECT_BPM24).l,%d3
+        moveq   #12,%d0
+        lsl.l   %d0,%d3
+        divu.l  %d1,%d3                 | the speed, 4096 = 1.0
+        bra.s   .rt_speed
+.rt_dry:
         moveq   #40,%d1
         mulu.l  %d4,%d1
         lea     (STATES).l,%a0
         move.l  S_INC(%a0,%d1.l),%d3
         moveq   #14,%d1
         asr.l   %d1,%d3                 | the speed, 4096 = 1.0
-        ble.s   .rt_none                | stopped or backwards
+.rt_speed:
+        tst.l   %d3
+        ble.w   .rt_none                | stopped or backwards
         | output samples = frames * 4096 / speed, as q * 4096 + r * 4096 / speed
         move.l  %d2,%d0
         divu.l  %d3,%d0                 | q
@@ -360,7 +394,6 @@ readout:
 .ro_mode:
         tst.l   (show_left).l
         beq.s   .ro_held
-        clr.l   (time_grace).l          | text holds the percentage now
         move.l  (show_track).l,%d0
         bsr     percent_text
         tst.l   %d0
@@ -371,16 +404,7 @@ readout:
         bmi.s   .ro_stock
         bsr     remain_text
         tst.l   %d0
-        beq.s   .ro_grace
-        moveq   #TIME_GRACE,%d0
-        move.l  %d0,(time_grace).l
-        bra.s   .ro_draw
-.ro_grace:
-        move.l  (time_grace).l,%d0      | a STATIC voice between its stream's states:
-        beq.s   .ro_stock               | the last time left, for a few draws
-        subq.l  #1,%d0
-        move.l  %d0,(time_grace).l
-        bra.s   .ro_draw
+        bne.s   .ro_draw
 .ro_stock:
         tst.l   (drawn).l
         beq.s   .ro_stock_go
@@ -448,5 +472,5 @@ show_left:  .long 0                     | timer calls left showing show_track's 
 was_held:   .long -1                    | the first held track at the last timer call
 timer_slot: .long -1
 drawn:      .long 0                     | the field holds our text
-time_grace: .long 0                     | draws left that may repeat the last time left
+live_at:    .long 0,0,0,0,0,0,0,0       | DTCN3 when each track's voice last read 1
 text:       .space 12
